@@ -1,5 +1,8 @@
 # Agent Bridge configuration
 # Place at ~/.agent-bridge/config.toml or pass --config <path>
+# Top-level keys must come before any [section] header.
+
+data_dir = "~/.agent-bridge"
 
 [node]
 # Unique identity for this machine within the mesh

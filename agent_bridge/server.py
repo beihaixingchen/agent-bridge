@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 import uvicorn
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
@@ -12,6 +14,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+from agent_bridge import tailscale as ts
 from agent_bridge.agent_card import build_agent_card
 from agent_bridge.auth import AuthMiddleware, KeyStore
 from agent_bridge.capabilities.filesystem import (
@@ -23,6 +26,7 @@ from agent_bridge.capabilities.registry import CapabilityRegistry
 from agent_bridge.capabilities.shell import RunCommandCapability
 from agent_bridge.config import Config, load_config
 from agent_bridge.executor import BridgeAgentExecutor
+from agent_bridge.mesh import MeshManager
 from agent_bridge.policy.enforcer import Enforcer
 from agent_bridge.policy.models import CapabilityConstraint
 from agent_bridge.policy.store import GrantStore
@@ -88,7 +92,7 @@ def create_admin_routes(
     ]
 
 
-def create_mesh_routes(config: Config, mesh_manager=None) -> list[Route]:
+def create_mesh_routes(config: Config, mesh_manager: MeshManager | None = None) -> list[Route]:
     """Create mesh discovery routes (only if mesh is enabled)."""
     if not config.mesh.enabled:
         return []
@@ -101,7 +105,13 @@ def create_mesh_routes(config: Config, mesh_manager=None) -> list[Route]:
             resp = mesh_manager.handle_announce(card, peers)
             return JSONResponse(resp)
         return JSONResponse(
-            {"agent_card": {"url": config.base_url, "name": config.node.id}, "peers": []}
+            {
+                "agent_card": {
+                    "url": config.mesh.self_url or config.base_url,
+                    "name": config.node.id,
+                },
+                "peers": [],
+            }
         )
 
     async def list_peers(_request: Request):
@@ -132,12 +142,61 @@ def create_app(config: Config) -> Starlette:
         agent_card=agent_card,
     )
 
+    # Create mesh manager (will be started in lifespan)
+    mesh_manager: MeshManager | None = None
+    if config.mesh.enabled:
+        mesh_manager = MeshManager(
+            node_id=config.node.id,
+            base_url=config.mesh.self_url or config.base_url,
+            token=config.mesh.token,
+            seeds=config.mesh.seeds,
+            announce_interval=config.mesh.announce_interval,
+            peers_file=config.peers_file,
+        )
+
+    @asynccontextmanager
+    async def lifespan(app: Starlette):
+        nonlocal mesh_manager
+
+        # --- Tailscale auto-setup ---
+        if config.tailscale.enabled:
+            ts_hostname = await ts.get_hostname()
+            if ts_hostname:
+                if config.tailscale.mode == "funnel":
+                    ok = await ts.setup_funnel(config.server.port)
+                else:
+                    ok = await ts.setup_serve(config.server.port)
+                if ok:
+                    self_url = f"https://{ts_hostname}"
+                    print(f"  Tailscale:     {config.tailscale.mode} → {self_url}")
+                    if mesh_manager:
+                        mesh_manager.base_url = self_url
+                        mesh_manager.peers_file  # touch to ensure path exists
+                else:
+                    print("  Tailscale:     setup failed (check `tailscale status`)")
+            else:
+                print("  Tailscale:     not installed or not running")
+
+        # --- Start mesh announce loop ---
+        if mesh_manager:
+            own_card = {"url": mesh_manager.base_url, "name": config.node.id}
+            mesh_manager.start(own_card)
+            print(f"  Mesh:          {config.node.id} @ {mesh_manager.base_url}")
+            if config.mesh.seeds:
+                print(f"  Seeds:         {', '.join(config.mesh.seeds)}")
+
+        yield
+
+        # --- Shutdown ---
+        if mesh_manager:
+            await mesh_manager.stop()
+
     # Assemble all routes
     routes = []
     routes.extend(create_agent_card_routes(agent_card))
     routes.extend(create_jsonrpc_routes(request_handler, "/"))
     routes.extend(create_admin_routes(key_store, grant_store, registry, config))
-    routes.extend(create_mesh_routes(config))
+    routes.extend(create_mesh_routes(config, mesh_manager))
 
     app = Starlette(
         routes=routes,
@@ -148,6 +207,7 @@ def create_app(config: Config) -> Starlette:
                 mesh_token=config.mesh.token,
             )
         ],
+        lifespan=lifespan,
     )
 
     # Attach state for CLI access
@@ -155,6 +215,7 @@ def create_app(config: Config) -> Starlette:
     app.state.grant_store = grant_store
     app.state.registry = registry
     app.state.config = config
+    app.state.mesh_manager = mesh_manager
 
     return app
 

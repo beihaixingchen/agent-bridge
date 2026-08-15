@@ -28,6 +28,7 @@ class PolicyConfig(BaseModel):
 class MeshConfig(BaseModel):
     enabled: bool = False
     token: str = ""
+    self_url: str = ""
     seeds: list[str] = Field(default_factory=list)
     announce_interval: int = 300
 
@@ -99,6 +100,10 @@ def load_config(config_path: str | None = None) -> Config:
         data["data_dir"] = v
     if v := os.environ.get("MESH_TOKEN"):
         data.setdefault("mesh", {})["token"] = v
+    if v := os.environ.get("AGENT_BRIDGE_MESH_SELF_URL"):
+        data.setdefault("mesh", {})["self_url"] = v
+    if v := os.environ.get("AGENT_BRIDGE_MESH_ENABLED"):
+        data.setdefault("mesh", {})["enabled"] = v.lower() in ("true", "1", "yes")
 
     config = Config(**data)
 
