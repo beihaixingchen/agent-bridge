@@ -1,0 +1,32 @@
+# Agent Bridge configuration
+# Place at ~/.agent-bridge/config.toml or pass --config <path>
+
+[node]
+# Unique identity for this machine within the mesh
+id = "mbp"
+name = "My MacBook"
+description = "Development machine"
+
+[server]
+host = "127.0.0.1"
+port = 8765
+
+[policy]
+# Default policy for unauthenticated callers: "deny" or "allow-local"
+default = "deny"
+
+[mesh]
+enabled = false
+# Shared token — all nodes in the same mesh must use the identical token.
+# Reference env var so the secret never lives in the config file:
+token = "${MESH_TOKEN}"
+# Seed peer URLs to bootstrap discovery (one direction is enough)
+seeds = []
+# Seconds between announce cycles
+announce_interval = 300
+
+[tailscale]
+# Set to true to auto-configure tailscale serve/funnel on startup
+enabled = false
+# "serve" = tailnet-only (recommended), "funnel" = public internet
+mode = "serve"
