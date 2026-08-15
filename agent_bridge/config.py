@@ -48,7 +48,7 @@ class Config(BaseModel):
 
     @property
     def data_path(self) -> Path:
-        p = Path(self.data_dir)
+        p = Path(self.data_dir).expanduser()
         p.mkdir(parents=True, exist_ok=True)
         return p
 

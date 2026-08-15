@@ -23,7 +23,11 @@ class CapabilityConstraint(BaseModel):
     def check_path(self, path: str) -> bool:
         if self.path_prefix is None:
             return True
-        return path.startswith(self.path_prefix)
+        # Normalize separators so cross-platform prefixes work
+        # (e.g. path_prefix="C:/" matches "C:\\Users\\..." on Windows)
+        norm_path = path.replace("\\", "/")
+        norm_prefix = self.path_prefix.replace("\\", "/")
+        return norm_path.startswith(norm_prefix)
 
     def check_command(self, command: str) -> bool:
         if self.allowed_commands is None:
