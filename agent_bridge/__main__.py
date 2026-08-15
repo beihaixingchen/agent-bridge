@@ -179,6 +179,46 @@ def cmd_peer_invoke(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# peer key management (API keys for calling remote peers)
+# ---------------------------------------------------------------------------
+def cmd_peer_key_add(args: argparse.Namespace) -> None:
+    config = load_config(args.config)
+    peer_keys_path = config.data_path / "peer_keys.json"
+    peer_keys = {}
+    if peer_keys_path.exists():
+        content = peer_keys_path.read_text().strip()
+        if content:
+            peer_keys = json.loads(content)
+    peer_keys[args.peer_url] = args.api_key
+    peer_keys_path.write_text(json.dumps(peer_keys, indent=2))
+    print(f"Saved key for {args.peer_url}")
+    print(f"  masked: {args.api_key[:12]}...")
+
+
+def cmd_peer_key_list(args: argparse.Namespace) -> None:
+    config = load_config(args.config)
+    peer_keys_path = config.data_path / "peer_keys.json"
+    if not peer_keys_path.exists():
+        print("No peer keys configured.")
+        return
+    peer_keys = json.loads(peer_keys_path.read_text())
+    if not peer_keys:
+        print("No peer keys configured.")
+        return
+    for url, key in peer_keys.items():
+        print(f"  {url:50s}  {key[:12]}...")
+
+
+# ---------------------------------------------------------------------------
+# MCP server
+# ---------------------------------------------------------------------------
+def cmd_mcp(args: argparse.Namespace) -> None:
+    from agent_bridge.mcp_server import run_mcp
+
+    run_mcp(config_path=args.config)
+
+
+# ---------------------------------------------------------------------------
 # argument parser
 # ---------------------------------------------------------------------------
 def build_parser() -> argparse.ArgumentParser:
@@ -260,6 +300,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--token", help="API key for the remote peer")
     p.set_defaults(func=cmd_peer_invoke)
+
+    pks = ps.add_parser("key", help="Manage API keys for remote peers")
+    pk_sub = pks.add_subparsers(dest="peer_key_command", required=True)
+
+    p = pk_sub.add_parser("add", help="Store an API key for a remote peer")
+    p.add_argument("peer_url", help="Peer URL (e.g. http://183.173.12.62:8765)")
+    p.add_argument("api_key", help="API key registered on that peer")
+    p.set_defaults(func=cmd_peer_key_add)
+
+    p = pk_sub.add_parser("list", help="List stored peer keys")
+    p.set_defaults(func=cmd_peer_key_list)
+
+    # mcp
+    p = sub.add_parser("mcp", help="Start MCP server (stdio) for AI agents")
+    p.set_defaults(func=cmd_mcp)
 
     return parser
 
